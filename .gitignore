@@ -1,2 +1,4 @@
 .cfmoto_estado.json
 cfmoto_historico.csv
+__pycache__/
+*.pyc

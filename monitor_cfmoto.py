@@ -51,7 +51,7 @@ INTERVALO_PADRAO = 300
 # qualquer hora e pode ficar pouco tempo no ar. O piso de 5s existe porque
 # abaixo disso o ganho e nulo (o Pix leva minutos) e o risco de bloqueio por
 # WAF deixa de ser teorico.
-INTERVALO_WIFI = 20
+INTERVALO_WIFI = 5
 WIFI_MINIMO = 5
 # No modo turbo aceitamos um intervalo bem menor, mas por tempo limitado.
 # Abaixo de 5s o ganho e nulo (quem demora e o humano, nao o script) e o risco
@@ -300,6 +300,8 @@ def main():
     print(f"Historico: {ARQ_LOG}")
     print("Ctrl+C para parar.\n")
 
+    ritmo_atual = intervalo
+
     while True:
         for local, url in ALVOS:
             try:
@@ -345,9 +347,11 @@ def main():
                 print(f"[{agora()}] {local}: erro {type(e).__name__}: {e}")
                 falhas += 1
 
-            em_turbo = turbo_ate > time.time()
-            time.sleep(random.uniform(0.4, 0.9) if em_turbo
-                       else random.uniform(2, 5))   # espaca as duas urls
+            # espaca as duas urls, mas sem estourar o ritmo pedido: com
+            # intervalo curto, um intervalo fixo de 2-5s dobraria o ciclo
+            rapido = turbo_ate > time.time() or ritmo_atual <= 30
+            time.sleep(random.uniform(0.4, 0.9) if rapido
+                       else random.uniform(2, 5))
 
         if turbo_ate > time.time():
             espera = turbo_seg
@@ -366,6 +370,7 @@ def main():
         if falhas >= 3:
             espera = min(espera * 3, 1800)
             print(f"  [aviso] varias falhas seguidas, aguardando {int(espera)}s")
+        ritmo_atual = espera
         time.sleep(max(espera, TURBO_MINIMO))
 
 

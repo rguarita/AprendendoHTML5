@@ -17,17 +17,10 @@ Uso:
     python3 monitor_cfmoto.py --intervalo 180
     python3 monitor_cfmoto.py --teste        # simula estoque para testar o alerta
 
-Telegram (opcional):
-    export TELEGRAM_BOT_TOKEN="123456:ABC..."
-    export TELEGRAM_CHAT_ID="987654321"
-
 ntfy (opcional, alcanca PC e outros aparelhos, sem cadastro):
     export NTFY_TOPIC="um-nome-secreto-e-dificil-de-adivinhar"
     # export NTFY_SERVER="https://ntfy.sh"   # ou a sua propria instancia
 
-WhatsApp via CallMeBot (opcional):
-    export CALLMEBOT_PHONE="+5519999999999"
-    export CALLMEBOT_APIKEY="123456"
 """
 
 import argparse
@@ -42,7 +35,6 @@ import subprocess
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import datetime
 
@@ -124,41 +116,6 @@ def analisar(html):
     }
 
 
-def telegram(msg):
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat = os.environ.get("TELEGRAM_CHAT_ID")
-    if not (token and chat):
-        return
-    try:
-        dados = json.dumps({"chat_id": chat, "text": msg}).encode()
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=dados, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=15).read()
-        print("  [ok] Telegram enviado.")
-    except urllib.error.HTTPError as e:
-        # a API do Telegram explica o motivo no corpo; sem isso o diagnostico
-        # vira adivinhacao na hora de configurar
-        try:
-            corpo = json.loads(e.read().decode())
-            motivo = corpo.get("description", "")
-        except Exception:
-            motivo = ""
-        print(f"  [erro] Telegram HTTP {e.code}: {motivo}")
-        if "chat not found" in motivo.lower():
-            print("         -> abra uma conversa com o SEU bot e envie /start antes.")
-        elif "unauthorized" in motivo.lower():
-            print("         -> TELEGRAM_BOT_TOKEN invalido ou incompleto.")
-    except Exception as e:
-        print(f"  [erro] Telegram falhou: {type(e).__name__}: {e}")
-
-
-def em_termux():
-    """Termux se identifica como Linux, mas nao tem notify-send; o que ele tem
-    e o termux-notification, do pacote termux-api."""
-    return bool(shutil.which("termux-notification"))
-
-
 def ntfy(titulo, msg, url=None):
     """Publica em um topico do ntfy (https://ntfy.sh por padrao). Nao exige
     cadastro nem telefone: o topico e a credencial, entao escolha um nome
@@ -192,36 +149,10 @@ def ntfy(titulo, msg, url=None):
         print(f"  [erro] ntfy falhou: {type(e).__name__}: {e}")
 
 
-def whatsapp(msg):
-    """Envia via CallMeBot, que e um servico de terceiros: a mensagem passa
-    pelo servidor deles. O conteudo aqui e so o aviso de estoque, sem nada
-    sensivel. E um canal secundario - a notificacao local do Android continua
-    sendo a mais rapida, por nao depender de rede."""
-    fone = os.environ.get("CALLMEBOT_PHONE")
-    chave = os.environ.get("CALLMEBOT_APIKEY")
-    if not (fone and chave):
-        return
-    try:
-        url = "https://api.callmebot.com/whatsapp.php?" + urllib.parse.urlencode(
-            {"phone": fone, "text": msg, "apikey": chave})
-        with urllib.request.urlopen(url, timeout=20) as r:
-            corpo = r.read().decode("utf-8", errors="replace")
-        baixo = corpo.lower()
-        if "queued" in baixo or "message sent" in baixo:
-            print("  [ok] WhatsApp enviado.")
-        else:
-            # a resposta vem em HTML; sem limpar, o erro fica ilegivel
-            limpo = re.sub(r"<[^>]+>", " ", corpo)
-            limpo = re.sub(r"\s+", " ", limpo).strip()
-            if "apikey" in baixo:
-                print("  [erro] WhatsApp: apikey invalida ou nao autorizada "
-                      "para este numero.")
-            else:
-                print(f"  [erro] WhatsApp: {limpo[:130]}")
-    except urllib.error.HTTPError as e:
-        print(f"  [erro] WhatsApp HTTP {e.code} - confira phone e apikey.")
-    except Exception as e:
-        print(f"  [erro] WhatsApp falhou: {type(e).__name__}: {e}")
+def em_termux():
+    """Termux se identifica como Linux, mas nao tem notify-send; o que ele tem
+    e o termux-notification, do pacote termux-api."""
+    return bool(shutil.which("termux-notification"))
 
 
 def notificar_desktop(titulo, msg):
@@ -310,8 +241,6 @@ def alertar(local, url, detalhe):
         sys.stdout.flush()
         time.sleep(0.35)
     notificar_desktop("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}")
-    telegram(msg)
-    whatsapp(msg)
     ntfy("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}", url)
 
 

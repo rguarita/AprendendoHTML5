@@ -48,8 +48,11 @@ INTERVALO_MINIMO = 60
 INTERVALO_PADRAO = 300
 # No Wi-Fi nao ha custo de dados nem de rede movel, entao vale checar mais
 # rapido: e onde se ganha chance de pegar uma desistencia, que aparece a
-# qualquer hora e pode ficar pouco tempo no ar.
-INTERVALO_WIFI = 60
+# qualquer hora e pode ficar pouco tempo no ar. O piso de 5s existe porque
+# abaixo disso o ganho e nulo (o Pix leva minutos) e o risco de bloqueio por
+# WAF deixa de ser teorico.
+INTERVALO_WIFI = 20
+WIFI_MINIMO = 5
 # No modo turbo aceitamos um intervalo bem menor, mas por tempo limitado.
 # Abaixo de 5s o ganho e nulo (quem demora e o humano, nao o script) e o risco
 # de bloqueio por WAF passa a ser concreto.
@@ -264,7 +267,8 @@ def main():
                         f"{TURBO_PADRAO}) durante a janela de abertura de lote")
     p.add_argument("--intervalo-wifi", type=int, default=INTERVALO_WIFI,
                    help=f"intervalo usado quando o celular esta no Wi-Fi "
-                        f"(padrao {INTERVALO_WIFI}s); so vale no Termux")
+                        f"(padrao {INTERVALO_WIFI}s, minimo {WIFI_MINIMO}s); "
+                        f"so vale no Termux")
     p.add_argument("--intervalo-fixo", action="store_true",
                    help="ignora a deteccao de Wi-Fi e usa sempre --intervalo")
     p.add_argument("--turbo-min", type=int, default=TURBO_DURACAO_PADRAO,
@@ -355,7 +359,7 @@ def main():
             if not args.intervalo_fixo:
                 wifi = no_wifi()
                 if wifi is True:
-                    base = args.intervalo_wifi
+                    base = max(args.intervalo_wifi, WIFI_MINIMO)
                 elif wifi is False:
                     base = intervalo
             espera = base + random.uniform(-min(30, base / 4), min(30, base / 4))

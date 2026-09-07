@@ -52,6 +52,9 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 # duas formas: \"has_stock\":true  e  "has_stock":true
 RE_STOCK = re.compile(r'\\?"has_stock\\?":\s*(true|false)')
 RE_PAYWALL = re.compile(r'\\?"paywallActive\\?":\s*(true|false)')
+# cada cor: slug + name, e o has_stock que vem logo depois
+RE_COR = re.compile(r'\\?"slug\\?":\\?"([a-z0-9-]+)\\?",\\?"name\\?":\\?"([^"\\]{1,40})\\?",\\?"thumbnail_url')
+RE_SINAL = re.compile(r'\\?"signalAmount\\?":\s*(\d+)')
 
 
 def agora():
@@ -70,11 +73,26 @@ def baixar(url, timeout=25):
 
 
 def analisar(html):
-    """Devolve (tem_estoque, variantes_com_estoque, total_variantes, paywall)."""
-    estoques = [m == "true" for m in RE_STOCK.findall(html)]
-    paywall = RE_PAYWALL.search(html)
-    paywall_ativo = bool(paywall and paywall.group(1) == "true")
-    return any(estoques), sum(estoques), len(estoques), paywall_ativo
+    """Devolve dict: cores nomeadas com estoque, flag geral, paywall, sinal."""
+    todos = [m == "true" for m in RE_STOCK.findall(html)]
+
+    # casa cada cor com o has_stock que aparece logo apos ela
+    cores = []
+    for m in RE_COR.finditer(html):
+        prox = RE_STOCK.search(html, m.end())
+        if prox:
+            cores.append((m.group(2), prox.group(1) == "true"))
+
+    pw = RE_PAYWALL.search(html)
+    sinal = RE_SINAL.search(html)
+    return {
+        "cores": cores,
+        "com_estoque": [n for n, tem in cores if tem],
+        "tem": any(todos),
+        "paywall": bool(pw and pw.group(1) == "true"),
+        "sinal": int(sinal.group(1)) if sinal else None,
+        "n_campos": len(todos),
+    }
 
 
 def telegram(msg):
@@ -123,6 +141,43 @@ def alertar(local, url, detalhe):
     telegram(msg)
 
 
+ARQ_ESTADO = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cfmoto_estado.json")
+ARQ_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cfmoto_historico.csv")
+
+
+def carregar_estado():
+    try:
+        with open(ARQ_ESTADO, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def salvar_estado(estado):
+    try:
+        with open(ARQ_ESTADO, "w", encoding="utf-8") as f:
+            json.dump(estado, f)
+    except Exception:
+        pass
+
+
+def registrar(local, info):
+    """Grava toda checagem em CSV. E assim que se descobre o padrao dos
+    lotes pequenos: com que frequencia saem, em que horario, e por quanto
+    tempo ficam no ar."""
+    novo_arquivo = not os.path.exists(ARQ_LOG)
+    try:
+        with open(ARQ_LOG, "a", encoding="utf-8") as f:
+            if novo_arquivo:
+                f.write("datahora,local,tem_estoque,cores_com_estoque,paywall\n")
+            f.write("{},{},{},{},{}\n".format(
+                datetime.now().isoformat(timespec="seconds"),
+                local, int(info["tem"]),
+                "|".join(info["com_estoque"]), int(info["paywall"])))
+    except Exception:
+        pass
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--intervalo", type=int, default=INTERVALO_PADRAO,
@@ -136,34 +191,53 @@ def main():
         return
 
     intervalo = max(args.intervalo, INTERVALO_MINIMO)
-    anterior = {local: None for local, _ in ALVOS}
+    if args.intervalo < INTERVALO_MINIMO:
+        print(f"[aviso] intervalo elevado para o minimo de {INTERVALO_MINIMO}s.")
+
+    estado = carregar_estado()
     falhas = 0
 
     print(f"Monitorando IBEX 450 em {len(ALVOS)} concessionarias, a cada ~{intervalo}s.")
+    print(f"Historico: {ARQ_LOG}")
     print("Ctrl+C para parar.\n")
 
     while True:
         for local, url in ALVOS:
             try:
-                tem, n_com, n_tot, paywall = analisar(baixar(url))
+                info = analisar(baixar(url))
                 falhas = 0
 
-                if n_tot == 0:
+                if info["n_campos"] == 0:
                     print(f"[{agora()}] {local}: nao achei has_stock no HTML "
                           f"(o site pode ter mudado de formato)")
                     continue
 
-                estado = f"{n_com}/{n_tot} cores com estoque"
-                flag = " | SALA DE ESPERA ATIVA (lote comecando!)" if paywall else ""
-                print(f"[{agora()}] {local}: {estado}{flag}")
+                registrar(local, info)
 
-                # so alerta na virada de indisponivel -> disponivel
-                if tem and anterior[local] is False:
-                    alertar(local, url, estado)
-                elif paywall and anterior[local] is not None:
-                    alertar(local, url, "sala de espera ligada - lote abrindo")
+                if info["cores"]:
+                    resumo = ", ".join(
+                        f"{nome}:{'SIM' if tem else 'nao'}" for nome, tem in info["cores"])
+                else:
+                    resumo = "sem estoque"
+                flag = "  <<< SALA DE ESPERA ATIVA" if info["paywall"] else ""
+                print(f"[{agora()}] {local}: {resumo}{flag}")
 
-                anterior[local] = tem
+                ant = estado.get(local, {})
+                antes_tem = ant.get("tem")
+                antes_pw = ant.get("paywall")
+
+                # BUG CORRIGIDO: alerta tambem na primeira leitura ja com estoque.
+                # Sem isso, reiniciar o script durante um lote pequeno = silencio.
+                if info["tem"] and antes_tem is not True:
+                    cores = ", ".join(info["com_estoque"]) or "disponivel"
+                    alertar(local, url, f"cores: {cores}")
+
+                # BUG CORRIGIDO: paywall so alerta na virada, nao a cada ciclo.
+                if info["paywall"] and antes_pw is not True:
+                    alertar(local, url, "sala de espera ligada - lote abrindo agora")
+
+                estado[local] = {"tem": info["tem"], "paywall": info["paywall"]}
+                salvar_estado(estado)
 
             except urllib.error.HTTPError as e:
                 print(f"[{agora()}] {local}: HTTP {e.code}")
@@ -174,7 +248,6 @@ def main():
 
             time.sleep(random.uniform(2, 5))   # espaca as duas urls
 
-        # recuo progressivo se o site estiver fora do ar
         espera = intervalo + random.uniform(-30, 30)
         if falhas >= 3:
             espera = min(espera * 3, 1800)

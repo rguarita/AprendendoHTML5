@@ -124,9 +124,26 @@ def telegram(msg):
         print(f"  [erro] Telegram falhou: {type(e).__name__}: {e}")
 
 
+def em_termux():
+    """Termux se identifica como Linux, mas nao tem notify-send; o que ele tem
+    e o termux-notification, do pacote termux-api."""
+    return bool(shutil.which("termux-notification"))
+
+
 def notificar_desktop(titulo, msg):
     so = platform.system()
     try:
+        if em_termux():
+            subprocess.run([
+                "termux-notification",
+                "--title", titulo,
+                "--content", msg,
+                "--priority", "max",
+                "--sound",
+                "--vibrate", "800,400,800,400,800",
+                "--id", "cfmoto",
+            ], check=False, timeout=15)
+            return
         if so == "Darwin":
             subprocess.run(["osascript", "-e",
                             f'display notification "{msg}" with title "{titulo}" sound name "Submarine"'],
@@ -141,6 +158,17 @@ def notificar_desktop(titulo, msg):
                            check=False, timeout=20)
     except Exception:
         pass
+
+
+def travar_suspensao():
+    """O Android mata processos em segundo plano. Sem o wake lock, o monitor
+    morre quando a tela apaga - e voce nem fica sabendo."""
+    if em_termux() and shutil.which("termux-wake-lock"):
+        try:
+            subprocess.run(["termux-wake-lock"], check=False, timeout=10)
+            print("[termux] wake lock ativado (o monitor sobrevive a tela apagada).")
+        except Exception:
+            pass
 
 
 def alertar(local, url, detalhe):
@@ -208,6 +236,7 @@ def main():
     if args.intervalo < INTERVALO_MINIMO:
         print(f"[aviso] intervalo elevado para o minimo de {INTERVALO_MINIMO}s.")
 
+    travar_suspensao()
     estado = carregar_estado()
     falhas = 0
 

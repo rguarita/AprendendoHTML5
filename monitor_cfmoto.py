@@ -46,6 +46,12 @@ ALVOS = [
 # vantagem nenhuma e e a forma mais rapida de tomar bloqueio de IP.
 INTERVALO_MINIMO = 120
 INTERVALO_PADRAO = 300
+# No modo turbo aceitamos um intervalo bem menor, mas por tempo limitado.
+# Abaixo de 5s o ganho e nulo (quem demora e o humano, nao o script) e o risco
+# de bloqueio por WAF passa a ser concreto.
+TURBO_MINIMO = 5
+TURBO_PADRAO = 10
+TURBO_DURACAO_PADRAO = 20
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 
@@ -233,6 +239,11 @@ def main():
                    help=f"segundos entre checagens (minimo {INTERVALO_MINIMO})")
     p.add_argument("--teste", action="store_true",
                    help="dispara o alerta uma vez para validar som/notificacao")
+    p.add_argument("--turbo", nargs="?", type=int, const=TURBO_PADRAO,
+                   help=f"checa a cada N segundos (min {TURBO_MINIMO}, padrao "
+                        f"{TURBO_PADRAO}) durante a janela de abertura de lote")
+    p.add_argument("--turbo-min", type=int, default=TURBO_DURACAO_PADRAO,
+                   help=f"duracao do turbo em minutos (padrao {TURBO_DURACAO_PADRAO})")
     args = p.parse_args()
 
     if args.teste:
@@ -246,6 +257,15 @@ def main():
     travar_suspensao()
     estado = carregar_estado()
     falhas = 0
+
+    turbo_ate = 0
+    if args.turbo:
+        turbo_seg = max(args.turbo, TURBO_MINIMO)
+        turbo_ate = time.time() + args.turbo_min * 60
+        if args.turbo < TURBO_MINIMO:
+            print(f"[aviso] turbo elevado para o minimo de {TURBO_MINIMO}s.")
+        print(f"TURBO: checando a cada {turbo_seg}s pelos proximos "
+              f"{args.turbo_min} min, depois volta para {intervalo}s.")
 
     print(f"Monitorando IBEX 450 em {len(ALVOS)} concessionarias, a cada ~{intervalo}s.")
     print(f"Historico: {ARQ_LOG}")
@@ -296,13 +316,21 @@ def main():
                 print(f"[{agora()}] {local}: erro {type(e).__name__}: {e}")
                 falhas += 1
 
-            time.sleep(random.uniform(2, 5))   # espaca as duas urls
+            em_turbo = turbo_ate > time.time()
+            time.sleep(random.uniform(0.4, 0.9) if em_turbo
+                       else random.uniform(2, 5))   # espaca as duas urls
 
-        espera = intervalo + random.uniform(-30, 30)
+        if turbo_ate > time.time():
+            espera = turbo_seg
+        else:
+            if turbo_ate:
+                print(f"[{agora()}] janela do turbo encerrada, voltando a {intervalo}s.")
+                turbo_ate = 0
+            espera = intervalo + random.uniform(-30, 30)
         if falhas >= 3:
             espera = min(espera * 3, 1800)
             print(f"  [aviso] varias falhas seguidas, aguardando {int(espera)}s")
-        time.sleep(max(espera, 30))
+        time.sleep(max(espera, TURBO_MINIMO))
 
 
 if __name__ == "__main__":

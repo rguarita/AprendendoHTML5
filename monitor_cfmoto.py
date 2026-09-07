@@ -297,7 +297,7 @@ def main():
     print("Ctrl+C para parar.\n")
 
     ritmo_atual = intervalo
-    rede_antes = None
+    rede_antes = "ainda-nao-verificado"
 
     while True:
         for local, url in ALVOS:

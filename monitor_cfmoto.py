@@ -17,9 +17,13 @@ Uso:
     python3 monitor_cfmoto.py --intervalo 180
     python3 monitor_cfmoto.py --teste        # simula estoque para testar o alerta
 
-Telegram (opcional, para receber no celular):
+Telegram (opcional):
     export TELEGRAM_BOT_TOKEN="123456:ABC..."
     export TELEGRAM_CHAT_ID="987654321"
+
+WhatsApp via CallMeBot (opcional, util para alcancar outros aparelhos):
+    export CALLMEBOT_PHONE="+5519999999999"
+    export CALLMEBOT_APIKEY="123456"
 """
 
 import argparse
@@ -34,6 +38,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
@@ -150,6 +155,38 @@ def em_termux():
     return bool(shutil.which("termux-notification"))
 
 
+def whatsapp(msg):
+    """Envia via CallMeBot, que e um servico de terceiros: a mensagem passa
+    pelo servidor deles. O conteudo aqui e so o aviso de estoque, sem nada
+    sensivel. E um canal secundario - a notificacao local do Android continua
+    sendo a mais rapida, por nao depender de rede."""
+    fone = os.environ.get("CALLMEBOT_PHONE")
+    chave = os.environ.get("CALLMEBOT_APIKEY")
+    if not (fone and chave):
+        return
+    try:
+        url = "https://api.callmebot.com/whatsapp.php?" + urllib.parse.urlencode(
+            {"phone": fone, "text": msg, "apikey": chave})
+        with urllib.request.urlopen(url, timeout=20) as r:
+            corpo = r.read().decode("utf-8", errors="replace")
+        baixo = corpo.lower()
+        if "queued" in baixo or "message sent" in baixo:
+            print("  [ok] WhatsApp enviado.")
+        else:
+            # a resposta vem em HTML; sem limpar, o erro fica ilegivel
+            limpo = re.sub(r"<[^>]+>", " ", corpo)
+            limpo = re.sub(r"\s+", " ", limpo).strip()
+            if "apikey" in baixo:
+                print("  [erro] WhatsApp: apikey invalida ou nao autorizada "
+                      "para este numero.")
+            else:
+                print(f"  [erro] WhatsApp: {limpo[:130]}")
+    except urllib.error.HTTPError as e:
+        print(f"  [erro] WhatsApp HTTP {e.code} - confira phone e apikey.")
+    except Exception as e:
+        print(f"  [erro] WhatsApp falhou: {type(e).__name__}: {e}")
+
+
 def notificar_desktop(titulo, msg):
     so = platform.system()
     try:
@@ -237,6 +274,7 @@ def alertar(local, url, detalhe):
         time.sleep(0.35)
     notificar_desktop("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}")
     telegram(msg)
+    whatsapp(msg)
 
 
 ARQ_ESTADO = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cfmoto_estado.json")

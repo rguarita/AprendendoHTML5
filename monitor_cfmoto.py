@@ -51,6 +51,10 @@ INTERVALO_PADRAO = 300
 # WAF deixa de ser teorico.
 INTERVALO_WIFI = 5
 WIFI_MINIMO = 5
+# Uma falha passageira na deteccao (o pacote termux-api sendo atualizado, por
+# exemplo) nao deve derrubar o ritmo por um periodo lento inteiro. Ate este
+# numero de falhas seguidas, o ultimo estado conhecido e mantido.
+MAX_FALHAS_REDE = 5
 # No modo turbo aceitamos um intervalo bem menor, mas por tempo limitado.
 # Abaixo de 5s o ganho e nulo (quem demora e o humano, nao o script) e o risco
 # de bloqueio por WAF passa a ser concreto.
@@ -298,6 +302,8 @@ def main():
 
     ritmo_atual = intervalo
     rede_antes = "ainda-nao-verificado"
+    rede_conhecida = None
+    falhas_rede = 0
 
     while True:
         for local, url in ALVOS:
@@ -359,15 +365,31 @@ def main():
             base = intervalo
             if not args.intervalo_fixo:
                 wifi = no_wifi()
-                if wifi is True:
+                if wifi is None:
+                    falhas_rede += 1
+                    # segura o ultimo estado conhecido enquanto a falha parecer
+                    # passageira; so entao assume o ritmo conservador
+                    if rede_conhecida is not None and falhas_rede <= MAX_FALHAS_REDE:
+                        efetiva = rede_conhecida
+                    else:
+                        efetiva = None
+                else:
+                    falhas_rede = 0
+                    rede_conhecida = wifi
+                    efetiva = wifi
+
+                if efetiva is True:
                     base = max(args.intervalo_wifi, WIFI_MINIMO)
-                elif wifi is False:
+                else:
                     base = intervalo
-                if wifi != rede_antes:
+
+                if efetiva != rede_antes:
                     nome = {True: "Wi-Fi", False: "dados moveis",
-                            None: "indeterminada (sem termux-api?)"}[wifi]
-                    print(f"[rede] {nome} -> intervalo de {int(base)}s")
-                    rede_antes = wifi
+                            None: "indeterminada (sem termux-api?)"}[efetiva]
+                    sufixo = " [deteccao falhou, mantendo o ultimo estado]" \
+                        if wifi is None and efetiva is not None else ""
+                    print(f"[rede] {nome} -> intervalo de {int(base)}s{sufixo}")
+                    rede_antes = efetiva
             espera = base + random.uniform(-min(30, base / 4), min(30, base / 4))
         if falhas >= 3:
             espera = min(espera * 3, 1800)

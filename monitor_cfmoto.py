@@ -21,7 +21,11 @@ Telegram (opcional):
     export TELEGRAM_BOT_TOKEN="123456:ABC..."
     export TELEGRAM_CHAT_ID="987654321"
 
-WhatsApp via CallMeBot (opcional, util para alcancar outros aparelhos):
+ntfy (opcional, alcanca PC e outros aparelhos, sem cadastro):
+    export NTFY_TOPIC="um-nome-secreto-e-dificil-de-adivinhar"
+    # export NTFY_SERVER="https://ntfy.sh"   # ou a sua propria instancia
+
+WhatsApp via CallMeBot (opcional):
     export CALLMEBOT_PHONE="+5519999999999"
     export CALLMEBOT_APIKEY="123456"
 """
@@ -155,6 +159,39 @@ def em_termux():
     return bool(shutil.which("termux-notification"))
 
 
+def ntfy(titulo, msg, url=None):
+    """Publica em um topico do ntfy (https://ntfy.sh por padrao). Nao exige
+    cadastro nem telefone: o topico e a credencial, entao escolha um nome
+    dificil de adivinhar - qualquer pessoa que saiba o nome recebe (e pode
+    enviar) mensagens nele. NTFY_SERVER permite apontar para uma instancia
+    propria."""
+    topico = os.environ.get("NTFY_TOPIC")
+    if not topico:
+        return
+    servidor = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
+    try:
+        # cabecalhos HTTP nao aceitam bem nao-ASCII; o corpo vai em UTF-8
+        def ascii_seguro(t):
+            return t.encode("ascii", "ignore").decode("ascii")
+
+        cab = {
+            "Title": ascii_seguro(titulo),
+            "Priority": "urgent",
+            "Tags": "rotating_light,motorcycle",
+        }
+        if url:
+            cab["Click"] = url
+        req = urllib.request.Request(f"{servidor}/{topico}",
+                                     data=msg.encode("utf-8"), headers=cab)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            r.read()
+        print("  [ok] ntfy enviado.")
+    except urllib.error.HTTPError as e:
+        print(f"  [erro] ntfy HTTP {e.code} - confira NTFY_TOPIC.")
+    except Exception as e:
+        print(f"  [erro] ntfy falhou: {type(e).__name__}: {e}")
+
+
 def whatsapp(msg):
     """Envia via CallMeBot, que e um servico de terceiros: a mensagem passa
     pelo servidor deles. O conteudo aqui e so o aviso de estoque, sem nada
@@ -275,6 +312,7 @@ def alertar(local, url, detalhe):
     notificar_desktop("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}")
     telegram(msg)
     whatsapp(msg)
+    ntfy("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}", url)
 
 
 ARQ_ESTADO = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cfmoto_estado.json")

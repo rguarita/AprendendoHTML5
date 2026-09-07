@@ -17,9 +17,6 @@ Uso:
     python3 monitor_cfmoto.py --intervalo 180
     python3 monitor_cfmoto.py --teste        # simula estoque para testar o alerta
 
-ntfy (opcional, alcanca PC e outros aparelhos, sem cadastro):
-    export NTFY_TOPIC="um-nome-secreto-e-dificil-de-adivinhar"
-    # export NTFY_SERVER="https://ntfy.sh"   # ou a sua propria instancia
 
 """
 
@@ -116,39 +113,6 @@ def analisar(html):
     }
 
 
-def ntfy(titulo, msg, url=None):
-    """Publica em um topico do ntfy (https://ntfy.sh por padrao). Nao exige
-    cadastro nem telefone: o topico e a credencial, entao escolha um nome
-    dificil de adivinhar - qualquer pessoa que saiba o nome recebe (e pode
-    enviar) mensagens nele. NTFY_SERVER permite apontar para uma instancia
-    propria."""
-    topico = os.environ.get("NTFY_TOPIC")
-    if not topico:
-        return
-    servidor = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
-    try:
-        # cabecalhos HTTP nao aceitam bem nao-ASCII; o corpo vai em UTF-8
-        def ascii_seguro(t):
-            return t.encode("ascii", "ignore").decode("ascii")
-
-        cab = {
-            "Title": ascii_seguro(titulo),
-            "Priority": "urgent",
-            "Tags": "rotating_light,motorcycle",
-        }
-        if url:
-            cab["Click"] = url
-        req = urllib.request.Request(f"{servidor}/{topico}",
-                                     data=msg.encode("utf-8"), headers=cab)
-        with urllib.request.urlopen(req, timeout=20) as r:
-            r.read()
-        print("  [ok] ntfy enviado.")
-    except urllib.error.HTTPError as e:
-        print(f"  [erro] ntfy HTTP {e.code} - confira NTFY_TOPIC.")
-    except Exception as e:
-        print(f"  [erro] ntfy falhou: {type(e).__name__}: {e}")
-
-
 def em_termux():
     """Termux se identifica como Linux, mas nao tem notify-send; o que ele tem
     e o termux-notification, do pacote termux-api."""
@@ -241,7 +205,6 @@ def alertar(local, url, detalhe):
         sys.stdout.flush()
         time.sleep(0.35)
     notificar_desktop("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}")
-    ntfy("CFMOTO IBEX 450 liberou!", f"{local} - {detalhe}", url)
 
 
 ARQ_ESTADO = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cfmoto_estado.json")

@@ -257,6 +257,14 @@ def registrar(local, info):
 
 
 def main():
+    # Redirecionado para arquivo, o Python bufferiza a saida em blocos de 4 KB
+    # e o log fica vazio por varios minutos, dando a impressao de que o monitor
+    # nao esta rodando. Linha a linha, o `tail` mostra o estado na hora.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     p = argparse.ArgumentParser()
     p.add_argument("--intervalo", type=int, default=INTERVALO_PADRAO,
                    help=f"segundos entre checagens (minimo {INTERVALO_MINIMO})")

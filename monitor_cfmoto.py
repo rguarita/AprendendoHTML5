@@ -182,18 +182,38 @@ def notificar_desktop(titulo, msg):
 
 def no_wifi():
     """True se o Android estiver em Wi-Fi. Fora do Termux, ou se a deteccao
-    falhar, devolve None e o chamador mantem o intervalo conservador."""
+    falhar, devolve None e o chamador mantem o intervalo conservador.
+
+    Nao exige SSID: a partir do Android 8.1 ler o nome da rede depende de
+    permissao de localizacao, e sem ela o sistema devolve "<unknown ssid>"
+    mesmo com o Wi-Fi conectado. O estado do supplicant e o IP nao dependem
+    dessa permissao, entao sao sinais mais confiaveis.
+    """
     if not shutil.which("termux-wifi-connectioninfo"):
         return None
     try:
         saida = subprocess.run(["termux-wifi-connectioninfo"],
                                capture_output=True, timeout=10, text=True).stdout
         info = json.loads(saida)
-        ssid = (info.get("ssid") or "").strip()
-        estado = (info.get("supplicant_state") or "").upper()
-        return estado == "COMPLETED" and ssid not in ("", "<unknown ssid>")
     except Exception:
         return None
+
+    estado = (info.get("supplicant_state") or "").upper()
+    if estado == "COMPLETED":
+        return True
+    if estado in ("DISCONNECTED", "INACTIVE", "SCANNING", "INTERFACE_DISABLED"):
+        return False
+
+    # sem supplicant_state utilizavel, aceita indicios de conexao ativa
+    ip = (info.get("ip") or "").strip()
+    if ip and ip not in ("0.0.0.0", "<unknown>"):
+        return True
+    if isinstance(info.get("link_speed_mbps"), int) and info["link_speed_mbps"] > 0:
+        return True
+    ssid = (info.get("ssid") or "").strip()
+    if ssid and ssid != "<unknown ssid>":
+        return True
+    return None
 
 
 def travar_suspensao():
@@ -309,6 +329,7 @@ def main():
     print("Ctrl+C para parar.\n")
 
     ritmo_atual = intervalo
+    rede_antes = None
 
     while True:
         for local, url in ALVOS:
@@ -374,6 +395,11 @@ def main():
                     base = max(args.intervalo_wifi, WIFI_MINIMO)
                 elif wifi is False:
                     base = intervalo
+                if wifi != rede_antes:
+                    nome = {True: "Wi-Fi", False: "dados moveis",
+                            None: "indeterminada (sem termux-api?)"}[wifi]
+                    print(f"[rede] {nome} -> intervalo de {int(base)}s")
+                    rede_antes = wifi
             espera = base + random.uniform(-min(30, base / 4), min(30, base / 4))
         if falhas >= 3:
             espera = min(espera * 3, 1800)

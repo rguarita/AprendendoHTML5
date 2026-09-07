@@ -106,8 +106,22 @@ def telegram(msg):
             f"https://api.telegram.org/bot{token}/sendMessage",
             data=dados, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=15).read()
+        print("  [ok] Telegram enviado.")
+    except urllib.error.HTTPError as e:
+        # a API do Telegram explica o motivo no corpo; sem isso o diagnostico
+        # vira adivinhacao na hora de configurar
+        try:
+            corpo = json.loads(e.read().decode())
+            motivo = corpo.get("description", "")
+        except Exception:
+            motivo = ""
+        print(f"  [erro] Telegram HTTP {e.code}: {motivo}")
+        if "chat not found" in motivo.lower():
+            print("         -> abra uma conversa com o SEU bot e envie /start antes.")
+        elif "unauthorized" in motivo.lower():
+            print("         -> TELEGRAM_BOT_TOKEN invalido ou incompleto.")
     except Exception as e:
-        print(f"  [aviso] Telegram falhou: {e}")
+        print(f"  [erro] Telegram falhou: {type(e).__name__}: {e}")
 
 
 def notificar_desktop(titulo, msg):

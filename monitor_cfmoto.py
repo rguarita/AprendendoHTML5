@@ -44,8 +44,12 @@ ALVOS = [
 
 # Intervalo minimo em segundos. Bater mais forte que isso no site nao te da
 # vantagem nenhuma e e a forma mais rapida de tomar bloqueio de IP.
-INTERVALO_MINIMO = 120
+INTERVALO_MINIMO = 60
 INTERVALO_PADRAO = 300
+# No Wi-Fi nao ha custo de dados nem de rede movel, entao vale checar mais
+# rapido: e onde se ganha chance de pegar uma desistencia, que aparece a
+# qualquer hora e pode ficar pouco tempo no ar.
+INTERVALO_WIFI = 60
 # No modo turbo aceitamos um intervalo bem menor, mas por tempo limitado.
 # Abaixo de 5s o ganho e nulo (quem demora e o humano, nao o script) e o risco
 # de bloqueio por WAF passa a ser concreto.
@@ -173,6 +177,22 @@ def notificar_desktop(titulo, msg):
         pass
 
 
+def no_wifi():
+    """True se o Android estiver em Wi-Fi. Fora do Termux, ou se a deteccao
+    falhar, devolve None e o chamador mantem o intervalo conservador."""
+    if not shutil.which("termux-wifi-connectioninfo"):
+        return None
+    try:
+        saida = subprocess.run(["termux-wifi-connectioninfo"],
+                               capture_output=True, timeout=10, text=True).stdout
+        info = json.loads(saida)
+        ssid = (info.get("ssid") or "").strip()
+        estado = (info.get("supplicant_state") or "").upper()
+        return estado == "COMPLETED" and ssid not in ("", "<unknown ssid>")
+    except Exception:
+        return None
+
+
 def travar_suspensao():
     """O Android mata processos em segundo plano. Sem o wake lock, o monitor
     morre quando a tela apaga - e voce nem fica sabendo."""
@@ -242,6 +262,11 @@ def main():
     p.add_argument("--turbo", nargs="?", type=int, const=TURBO_PADRAO,
                    help=f"checa a cada N segundos (min {TURBO_MINIMO}, padrao "
                         f"{TURBO_PADRAO}) durante a janela de abertura de lote")
+    p.add_argument("--intervalo-wifi", type=int, default=INTERVALO_WIFI,
+                   help=f"intervalo usado quando o celular esta no Wi-Fi "
+                        f"(padrao {INTERVALO_WIFI}s); so vale no Termux")
+    p.add_argument("--intervalo-fixo", action="store_true",
+                   help="ignora a deteccao de Wi-Fi e usa sempre --intervalo")
     p.add_argument("--turbo-min", type=int, default=TURBO_DURACAO_PADRAO,
                    help=f"duracao do turbo em minutos (padrao {TURBO_DURACAO_PADRAO})")
     args = p.parse_args()
@@ -326,7 +351,14 @@ def main():
             if turbo_ate:
                 print(f"[{agora()}] janela do turbo encerrada, voltando a {intervalo}s.")
                 turbo_ate = 0
-            espera = intervalo + random.uniform(-30, 30)
+            base = intervalo
+            if not args.intervalo_fixo:
+                wifi = no_wifi()
+                if wifi is True:
+                    base = args.intervalo_wifi
+                elif wifi is False:
+                    base = intervalo
+            espera = base + random.uniform(-min(30, base / 4), min(30, base / 4))
         if falhas >= 3:
             espera = min(espera * 3, 1800)
             print(f"  [aviso] varias falhas seguidas, aguardando {int(espera)}s")

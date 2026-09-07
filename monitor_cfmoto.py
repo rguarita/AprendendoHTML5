@@ -23,6 +23,7 @@ Telegram (opcional, para receber no celular):
 """
 
 import argparse
+import gzip
 import json
 import os
 import platform
@@ -62,14 +63,20 @@ def agora():
 
 
 def baixar(url, timeout=25):
+    """Pede gzip: a pagina cai de ~51 KB para ~18 KB. Em dados moveis, rodando
+    o dia inteiro, isso e a diferenca entre ~890 MB e ~300 MB por mes."""
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "pt-BR,pt;q=0.9",
+        "Accept-Encoding": "gzip",
         "Cache-Control": "no-cache",
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", errors="replace")
+        dados = r.read()
+        if (r.headers.get("Content-Encoding") or "").lower() == "gzip":
+            dados = gzip.decompress(dados)
+        return dados.decode("utf-8", errors="replace")
 
 
 def analisar(html):
